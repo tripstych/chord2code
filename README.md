@@ -1,5 +1,12 @@
 # chord2code
 
+Ever been using your DAW with your QWERTY sitting just out of reach or awkwardly positioned and you need to hit that special key on it
+while you've got 88 keys staring at you, mocking you?  
+It doesn't matter how good your MIDI controller is, it's not going to press F2
+and it'd be great if it would just press 'R' and 'space' when I hit this ... disharmonic chord I'd never play normally?
+
+Me too.
+
 The GUI is fairly self explanatory.
 
 ![Screenshot 2023-06-01 092312](https://github.com/tripstych/chord2code/assets/134851685/41ca8ba2-f095-4171-bfac-2de74bf4784b)
