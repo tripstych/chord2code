@@ -14,8 +14,23 @@ import PySimpleGUI as sg
 import re
 
 
+ACTIVE_COLOR = "#a0a0f0"
+
 #Settings path
 SETTINGS_PATH = './settings.cfg'
+
+
+INTRO_TEXT ="""Chord2Key::
+Select your MIDI Device from the inputs 
+Select an Output - required for passthru -  
+
+Use [MIDI Capture] to set the MIDI note/chord to record,
+or use the GUI keys to toggle the keys you want as your trip.
+
+Use [Keyboard Capture] to record keystrokes for your selcection.
+
+"""
+
 SCAN_CODES = {1:'ESC', 2:'1', 3:'2', 4:'3', 5:'4', 6:'5', 7:'6', 8:'7', 9:'8', 10:'9',
                11:'0', 12:'-', 13:'=', 14:'<=Back', 15:'Tab', 
                16:'Q', 17:'W', 18:'E', 19:'R', 20:'T', 21:'Y', 22:'U', 23:'I', 24:'O', 25:'P', 26:'[', 27:']', 28:'_/Enter',
@@ -28,14 +43,10 @@ SCAN_CODES = {1:'ESC', 2:'1', 3:'2', 4:'3', 5:'4', 6:'5', 7:'6', 8:'7', 9:'8', 1
                          }
 DEBUG = True
 
-
-#plain printing debugs are 
-# four flaming flamingos 
-# filled in, trip-lick-it
  
 def verbox(txt):
     print(txt)
-    
+
 
 #UI translation boilerplate
 langSet = 'en'
@@ -50,17 +61,17 @@ def _(str, key=None):
 class MTKB():
 
     def __init__(self):
-        sg.theme('DarkGreen')
+        sg.theme('darkblue')
+        #sg.set_options(button_color = "#ffffff")
         pygame.init()
         
         # make a button and store it 
         def pianoKeyBtn(text = "", key = None, size=None, button_color = None):
             self.pianoKeys[key] = sg.Button('', key = f"^{key}", size=size, button_color = button_color)
-            self.pianoKeys[key].default_color = button_color
             return self.pianoKeys[key]
 
         # make a button and store it 
-        def scancodeBtn(val, key = None, button_color = None, size=None):
+        def scanCodeBtn(val, key = None, button_color = None, size=None):
             key = F"{key}".lower()
             btn = sg.Button(f"{val}", key = F"{key}", button_color = button_color if button_color is not None else sg.DEFAULT_BUTTON_COLOR, size=size if size else (3,3), pad =(0,0)  )
             self.keybdBtns[F"{key}"] = btn
@@ -72,7 +83,8 @@ class MTKB():
         # used while testing & with zombies locking up the port 
         # open(".lock","w").close()
         # self.locked = True 
-        
+        self.inTheLoop = False
+
         # if ( os.path.exists('.lock') ):
         #     print("Lock file exists, graceful shutdown fail")
         #     return
@@ -88,7 +100,10 @@ class MTKB():
 
 
         self.config = {}
+        self.connectState = False
         self.chordSet = "" #numericallidiction
+        self.daemon = False
+        self.playbackDisabled = False
         self.captureKey = 59        
         self.chooseCapture = False
         self.recKeysMode = False
@@ -99,7 +114,7 @@ class MTKB():
         self.keybdBtns = {}
         self.codeChords = {}
         self.pianoKeysPressed = []
-        
+        self.midiThruState = True
 
 
         white = [0, 2, 4, 5, 7, 9, 11]
@@ -126,34 +141,54 @@ class MTKB():
                 self.codeChords=self.config['codeChords']
                 #print(self.codeChords)
 
+        if self.config.get('autoConn'):
+            self.autoConn = self.config['autoConn']
+        else:
+            self.autoConn = True
+
+        if self.config['midiConnect']:
+            
+            if not self.config['midiConnect'].get('midiIn'):
+                self.config['midiConnect']['midiIn']=0
+            if not self.config['midiConnect'].get('midiOut'):
+                self.config['midiConnect']['midiOut']=0
 
         (midiIn, midiOut )=(self.config['midiConnect']['midiIn'],self.config['midiConnect']['midiOut'])     
+        
+
+
         self.keystrokes = ['']
 
-        #a crude piano key set of 12
         midiOptions = [         ]
         #functionality
-        midiOptions.append([sg.Text("INPUT",justification="left"),sg.OptionMenu(k='_midiIn',tooltip="INPUT",values=inputs, default_value = midiIn if midiIn in inputs else inputs[-1] )])
-        midiOptions.append([sg.Text("OUTPUT",justification="left"),sg.OptionMenu(k='_midiOut',values=outputs, default_value = midiOut if midiOut in outputs else outputs[-1])])
+        self.midiInOpt = sg.OptionMenu(k='_midiIn',tooltip="INPUT",values=inputs, default_value = "".join(list(filter(lambda a: F"{midiIn}::" in a, inputs))) )
+        self.midiOutOpt = sg.OptionMenu(k='_midiOut',values=outputs, default_value = "".join(list(filter(lambda a: F"{midiOut}::" in a, outputs))) )
 
+        self.autoConnCB = sg.Checkbox("Auto Connect",default=self.autoConn, tooltip="Connect when opened",k='_autoConnToggle',enable_events=True)
+
+
+        midiOptions.append([self.autoConnCB,sg.Text("modulus"),sg.Input("12",key="modulus",size=2),sg.Text("offset note"),sg.Input("0",key="offset",size=2),
+                        sg.Text("INPUT",justification="left"), self.midiInOpt,sg.Text("OUTPUT",justification="left"), self.midiOutOpt])
             
-        self.thruBtn = sg.Button( _('Midi Thru'),k='_midiThru')
+        self.thruBtn = sg.Button( _('Midi Thru'),k='_midiThru',button_color=ACTIVE_COLOR)
 
         self.recMidiBtn = sg.Button( _('MIDI Capture'), k='_recMidiToggle')
-        
+
         self.recKeysBtn = sg.Button( _('Keyboard Capture'), k='_recKeysToggle')
         
         self.readyBtn = sg.Button( _('MIDI'), k='_ready')
         self.connectBtn = sg.Button( _('Connect'),k='_connect')
         
-        self.disconnectBtn = sg.Button( _('Disconnect'),k='_disconnect',disabled=True)
+
+        
+
+        #self.disconnectBtn = sg.Button ( _('Disconnect'),k='_disconnect',disabled=True)
 
 
         midiOptions.append(
                     [
                        sg.Text( _('MIDI:')) , 
                        self.connectBtn, 
-                       self.disconnectBtn,
                        self.thruBtn, 
                        self.recMidiBtn, 
                        self.recKeysBtn,
@@ -179,56 +214,83 @@ class MTKB():
  
         
         self.chooseCapBtn = sg.Button(_('Choose Capture Key'),k='_chooseCaptureKey',expand_x=True)
+        self.disablePlaybackBtn = sg.Button(_('Disable Playback'),k='_disablePlayback',expand_x=True )
+        self.keystrokeList = sg.Listbox(values=self.keystrokes, size = (26,40))
 
-        self.keystrokeList = sg.Listbox(values=self.keystrokes, size = (50,200), auto_size_text = True)
+        self.removeKeystrokeBtn = sg.Button(_('Ꭓ'),k='_removeKeystroke',expand_x=True)
+        self.clearKeystrokesBtn = sg.Button(_('Clear Keystrokes'),k='_clearKeystrokes',expand_x=True)
+        
 
-        self.statusBar = sg.Text("")
-        self.verbLines = sg.Multiline("""Chord2Key::
-Select your MIDI Device from the inputs 
-Select an Output - required for passthru -  
+        self.statusBar = sg.Text(self.statusBarText())
+        self.verbLines = sg.Multiline(INTRO_TEXT,size=(50,50),write_only=True, reroute_stdout=True)
 
-Use [MIDI Capture] to set the MIDI note/chord to record,
-or use the GUI keys to toggle the keys you want as your trip.
-
-Use [Keyboard Capture] to record keystrokes for your selcection.
-
-Currently a modulus 12 is used on the note number, simply to simplify entering chords.
-
-"""
-                                        ,size=(50,100),write_only=True, reroute_stdout=True)
-
-        midiValues = sg.user_settings_get_entry('midiConnect')
-
-        self.verbLines
+        pksFrame = sg.Frame(
+                            '',
+                            [ [pianoKeyBtn("",key=key, size=(2,4), button_color = '#eeeeee' if key in white else '#000000' ) for key in range(0,12)]  ],
+                            key = 'pianoKeys',
+                            visible=True
+                             )        
+        
+        midiFrame = sg.Frame('', midiOptions, vertical_alignment="top",visible=True)
+        captureFrame = sg.Frame('',[[self.disablePlaybackBtn],[self.chooseCapBtn],[self.clearKeystrokesBtn] ,[sg.Text("Keystrokes")],
+                                    [self.keystrokeList,self.removeKeystrokeBtn] ], vertical_alignment="top",size=(240,300),
+                                     key = 'captureKeys',
+                                      visible=True)
+        infoFrame = sg.Frame('',[[self.statusBar],[self.verbLines]], vertical_alignment="top", size=(380,400),
+                             key = 'infoFrame',
+                             visible=True)
         
         layout =[
-                [
-                    sg.Frame(
-                            '',
-                            [ [pianoKeyBtn("",key=key, size=(2,4), button_color = '#eeeeee' if key in white else '#000000' ) for key in range(0,12)]  ]
-                             )
+                 [
+                    pksFrame
                 ],
-                [
-                   sg.Frame('', midiOptions, vertical_alignment="top")
+                   [
+                   midiFrame
                 ],
+             
                 [
-                    sg.Frame('',[[self.chooseCapBtn],[sg.Text("Keystrokes")],[self.keystrokeList] ], vertical_alignment="top",size=(240,400))
+                    captureFrame
                 , 
-                    sg.Frame('',[[self.statusBar],[self.verbLines]], vertical_alignment="top", size=(380,400)) 
+                    infoFrame 
                 ]
                 ]
-        layout = [ [ sg.Frame('Chord2Key/stroke~>smell-of-burnt-taoist',layout)]]
-        self.factory(layout)
+        
+        outlayout = [ 
+                    [sg.Frame('Chord2KeyStroke;. do you smell-burnt-taoist?',
+                                 layout,element_justification="center", 
+                                 vertical_alignment="center", 
+                                 expand_y=True, 
+                                 expand_x=True)
+                    ]]
+
+        self.factory((layout,outlayout))
+
+    def factory(self,box):
+        (layout,outlayout)=box
+
+        window = sg.Window('MIDItoKB', outlayout, alpha_channel=0.9, location=(0,0), size=(800,600), margins=(20,20), resizable=True, finalize=True)        
+        self.window = window  
+        self.layout = layout
+
         
 
-    def factory(self,layout):
-        window = sg.Window('MIDItoKB', layout, alpha_channel=0.9, location=(0,0), size=(1024,768), margins=(20,20), resizable=True, finalize=True)        
-        self.window = window
-        self.layout = layout
-        #factory gears -  glue twixt the view & model - aeroplane gooloo hehehahahebblbshit ummm - Nothing to see here! Move along.
+        #factory gears -  gloo for the view 
         while True:
             event,  values = window.read()
+            self.inTheLoop = True
+            if values is None:
+                continue
+            
+            for k in values.keys():
+                kS=F"{k}"
+                if kS[0]=='#':
+                    z = kS[1:]
+                    val=values[kS]
+                    if hasattr(self,z):
+                        print(z,val,">>>>,")
+                        self.__setattr__(z,val)
             self.statusBar.update(self.statusBarText())
+            
 #            self.keystrokeList.update(values=self.keystrokes)
 
             if event == sg.WIN_CLOSED:
@@ -236,7 +298,7 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
             else:
                 sEvent = F"{event}"
                 if sEvent.isnumeric():
-                    print("DEFUNC?")
+                    verbox("DEFUNC?")
                     #self.scanCodeSet(sEvent)
                     continue
 
@@ -245,6 +307,7 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
                     nEvent = int(sEvent)
                     self.midiBtnPress(nEvent)
                     continue
+
                 
                 sEvent = sEvent[1:] if sEvent[0]=='_' else sEvent
                 if hasattr(self,sEvent): 
@@ -253,13 +316,12 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
                     dic = {}
                     for k, v in values.items():
                         k=F"{k}"
-                        #split numerics from MIDI device selects,
-                        #split numerics from MIDI device selects,
                         #buid a dict for the named func call
                         if type(v) == type(""):
                             spill = v.split('::')
+                            #for midi list/option values
                             if k[0] == '_':
-                                dic[ k[1:]  ] = v
+                                dic[ k[1:] ] = v
                             if len(spill) > 1:
                                 if spill[0].isnumeric():
                                     spill[0] = int(spill[0])
@@ -270,25 +332,25 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
                     if attr:
                         attr(dic)
 
-                
-
-                
-
         window.close()
 
+    def autoConnToggle(self,vals): 
+        self.autoConn = not self.autoConn
+        print(vals,'autocmmmm;',self.autoConn)
 
     def keyboardHook(self,event):
         #(ev_type, ev_key)= (event.event_type, event.scan_code)
-        #print(event.event_type, self.chooseCapture)
+        #verbox(event.event_type, self.chooseCapture)
         if self.chooseCapture and event.event_type == "up":
             self.captureKey = event.scan_code
             self.chooseCapture = False
             self.chooseCapBtn.update(button_color = sg.DEFAULT_BUTTON_COLOR)
-            self.statusBar.update(self.statusBarText())
+            #if (self.inTheLoop):
+            #self.statusBar.update(self.statusBarText())
             return
         
 
-        #print((event.scan_code,self.captureKey == event.scan_code))
+        #verbox((event.scan_code,self.captureKey == event.scan_code))
 
         if event.scan_code == self.captureKey:
             if event.event_type == "up":
@@ -296,7 +358,7 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
             return
 
         if self.recKeysMode and self.chordSet:
-            #print(F"keyboardHook:{self.chordSet} ->> {event}")
+            #verbox(F"keyboardHook:{self.chordSet} ->> {event}")
             self.keystrokes.append(F"{event.event_type}::{event.name}::{event.scan_code}")
             self.setCodeChord(self.chordSet,self.keystrokes)
             #self.codeChords[self.chordSet]=self.keystrokes
@@ -304,12 +366,42 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
         
         self.statusBar.update(self.statusBarText())
 
-
     def getCodeChord(self,chordValue):
         return self.codeChords[F"{chordValue}"] if self.codeChords.get(F"{chordValue}") else [] 
     
     def setCodeChord(self,chordValue,strokes):
+        if chordValue == None:
+            return
         self.codeChords[F"{chordValue}"] = strokes            
+
+    #def autoConn(self,vals):
+    #LAMBe
+
+    def clearKeystrokes(self,event):
+        verbox("clearing keystrokes")
+        values = []
+        self.setCodeChord(self.chordSet,values)
+        self.updateKeystrokeList()
+
+    def removeKeystroke(self,event):
+        verbox("Removing selected keystroke")
+        values = self.keystrokeList.GetListValues()
+        for stroke in self.keystrokeList.get_indexes():
+            values.__delitem__(stroke)
+        self.keystrokeList.update(values)
+        self.setCodeChord(self.chordSet,values)
+        self.updateKeystrokeList()
+
+    def clearKeystrokes(self,event):
+        verbox("removing strokes from chord # {self.chordSet}")
+        self.setCodeChord(self.chordSet,[""])
+        self.updateKeystrokeList()
+
+    def disablePlayback(self, event):
+        self.playbackDisabled = not self.playbackDisabled
+        self.disablePlaybackBtn.update(button_color=ACTIVE_COLOR if self.playbackDisabled else sg.DEFAULT_BUTTON_COLOR)
+
+
 #######factory##functions#########################################################################
 
     def chooseCaptureKey(self, event):
@@ -332,11 +424,11 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
             tot = tot + 2**i
 
         self.pianoKeysUpdate(tot)
+        
 
     def midiThru(self,event):
-        if self.daemon:
-            self.daemon.midiThru = not self.daemon.midiThru
-            self.thruBtn.update(button_color = 'green' if self.daemon.midiThru else sg.DEFAULT_BUTTON_COLOR)
+        self.midiThruState = not self.midiThruState
+        self.thruBtn.update(button_color = ACTIVE_COLOR if self.midiThruState else sg.DEFAULT_BUTTON_COLOR)
 
     def recMidiToggle(self,event):
         self.midiMode = not self.midiMode
@@ -350,8 +442,10 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
         else:
             if self.chordSet and len(self.keystrokes):
                 self.setCodeChord(self.chordSet,self.keystrokes)
+                self.updateKeystrokeList()
                 #self.codeChords[self.chordSet] = self.keystrokes
                 self.recKeysBtn.update(button_color = sg.DEFAULT_BUTTON_COLOR)
+                self.config['autoConn']= self.autoConn
                 self.config['codeChords'] = self.codeChords
                 sg.user_settings_set_entry('config',self.config)
                 sg.user_settings_save(SETTINGS_PATH)
@@ -359,22 +453,47 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
             
         self.recKeysBtn.update(button_color = 'red' if self.recKeysMode else sg.DEFAULT_BUTTON_COLOR)
     
-    #update the chord/note associated with a keyboard scan code
+    #update the chord<oops,n.m.>/note associated with a keyboard scan code
+    def save(self,values):
+        self.config['autoConn'] = self.autoConn
+        self.config['midiConnect'] = values
+        sg.user_settings_set_entry('config',self.config)
+        sg.user_settings_save(SETTINGS_PATH)
+        
+        sg.user_settings_set_entry('config',self.config)
+        print(self.config )
+        sg.user_settings_save(SETTINGS_PATH)
+
     def scanCodeSet(self, sEvent):
         #defunct
         return
         
     def updateKeystrokeList(self):
-        self.keystrokeList.update(values = self.codeChords[self.chordSet] if self.codeChords.get(self.chordSet) else ["[RECORD KEYSTROKES]"])
+        self.keystrokeList.update(values = 
+                                  self.codeChords[self.chordSet] 
+                                  if self.codeChords.get(self.chordSet) else [""])
 
 
-    def pianoKeysUpdate(self, value):
+    def pianoKeysUpdate(self, value: int):
         button_colors = [  ['#666666','#000000'],
         ['#808080','#FFffFF'] ]
-        value = int(value)
+
         for i in range(12):
             button_color = button_colors[1 if i in self.whiteKeys  else 0][0 if value&2**i else 1]
             self.pianoKeys[i].update(button_color = button_color )
+
+        if value == 0:
+            self.chordSet = None
+            verbox("No key/chord selected")
+            return
+        
+        s1=chr(19904+value%64)
+        s1.encode("utf-8")
+        s2=chr(19904+int(value/64)%64)
+        s2.encode("utf-8")
+        
+        verbox(F"Key/Chord {s2}{s1} selected for programming")#{bin(value)[2:]}/
+
         
         self.chordSet = F"{value}"
 
@@ -385,20 +504,21 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
         #sg.user_settings_save(SETTINGS_PATH)
 
     def connect(self,values = False):
-        del(self.daemon)
+        #del(self.daemon)
+        
+        self.connectState = not self.connectState
+        if self.connectState == False:
+            self.connectBtn.update(text=_("Connect"), button_color=sg.DEFAULT_BUTTON_COLOR)
+            return self.disconnect()
 
         self.daemon = MTKB_Daemon(Client = self)
 
-
-        if values == False:
+        if not values:
+            print("no values!",values)
             return
         
-        self.config['midiConnect'] = values
-        sg.user_settings_set_entry('config',self.config)
-        sg.user_settings_save(SETTINGS_PATH)
-
-        inPort = values['midiIn']
-        outPort = values['midiOut']
+        inPort = values.get('midiIn')
+        outPort = values.get('midiOut')
 
         #try try try
         if midi.get_init():
@@ -411,40 +531,36 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
             midiIn = midi.Input(inPort)
             midiIn.poll()
         except:
-            sg.popup_auto_close("MIDI Input failed! Device maybe in use?")
-            verbox(F"\"{inPort}\" ::  midi.Input() I/O error")
+            verbox(F"midi.Input() I/O error, port is likely in use.")
             return
 
         
-        self.connectBtn.update(disabled=True)
-        self.disconnectBtn.update(disabled=False)
+        self.connectBtn.update(text=_("Disconnect"),button_color=ACTIVE_COLOR)
+        #self.disconnectBtn.update(disabled=False)
         
         #midiOut = -999
         try:
             midiOut = midi.Output(outPort)
             midiOut.note_off(0,0)
         except:
-            sg.popup_auto_close("MIDI Output failed, and all you got was this awful error")
-            verbox("the O end in porcelean")
+            verbox("MIDI Output failed, and all you got was this awful error")
+            
         
         #and even then
-        # if hooked, unhook, it was all a test suka
+        # if hooked, unhook, it was all a test
         if midi.get_init():
             midi.quit()
 
-        #now we 'safe fly' start daemon
+        #now, start daemon
         verbox(F"MIDI connect initiated.")
 
-        self.daemon.start( (inPort,outPort) )
+        self.daemon.start( (int(inPort),int(outPort)) )
 
 
-    def disconnect(self,values):
-        verbox("<- ->")
-        self.connectBtn.update(disabled=False)
-        self.disconnectBtn.update(disabled=True)
-        #pygame.quit()
-        self.daemon.stop()
-        verbox("-><-")
+    def disconnect(self):
+        if self.daemon:
+            #verbox("disconnect")
+            self.daemon.stop()
     
     def getMidiDevices(self):
         inputs = []
@@ -463,18 +579,20 @@ Currently a modulus 12 is used on the note number, simply to simplify entering c
 
 
 
+
 import threading
 class MTKB_Daemon():
 
-    def __init__(self, Client = None, modulus = 12):
+    def __init__(self, Client = None, modulus = 12, offset = 0):
         #debuggery(userInterface)
+         
         self.mod = modulus
+        self.offset = offset
         self.client = Client
         self.inTheLoop = False
         self.keepAlive = True
         self.midiIn = None
         self.midiOut = None
-        self.midiThru = True
         self.thread = threading.Thread(target=self.poll)
 
     def start(self,ioPorts):
@@ -520,22 +638,22 @@ class MTKB_Daemon():
             if self.midiIn.poll():
                 
                 msg=self.midiIn.read(1) 
-                if self.midiOut and self.midiThru:
+                if self.midiOut and self.client.midiThruState:
                     self.midiOut.write(msg)
                 msg = msg[0][0]
                 
-                verbox(msg)
-                dir = "up" if msg[0] == 128 else "down"
-                note = msg[1] % self.mod
-                #debuggery(F"midi-read:{note}")
-                if dir == "down":                                                     
-                    tot = 0
+                #verbox(msg)
+#                verbox( "˄" if msg[0]==128 else "˅")
+#                dir = "up" if msg[0] == 128 else "down"
+                note = msg[1]
+                note = (note + self.offset) % self.mod
+#                note = msg[1] % self.mod
+
+                if msg[0]==128:
+                    keysDown-=1
+                else:
                     keysDown+=1
                     notes.append(note)
-                    for i in notes:
-                        tot += 2**i
-                if dir == "up":
-                    keysDown-=1
                     
                 if keysDown == 0:
                     tot = 0
@@ -544,20 +662,22 @@ class MTKB_Daemon():
                     
                     sTot = F"{tot}"
                     strokes = self.client.getCodeChord(sTot)
-                    print(F"keys-- {tot}")
-                    #print(self.client.codeChords)
-                    print(strokes)
-                    if strokes:
-                        for key in strokes:
-                            bits = key.split("::")
-                            if bits[0] and bits[1]:
-                                ke = keyboard.KeyboardEvent(bits[0],bits[1])
-                                keyboard.play([ke])
-                        
+#                   verbox(F"chord/key#{tot} ")
+                    #verbox(self.client.codeChords)
+#                   verbox(strokes)
+                    if not self.client.playbackDisabled:
+                        if len(strokes)==0:
+                            verbox(F"playback {list(strokes)}")
+                            for key in strokes:
+                                bits = key.split("::")
+                                if bits[0] and bits[1]:
+                                    ke = keyboard.KeyboardEvent(bits[0],bits[1])
+                                    keyboard.play([ke])
+                            
 
                     if self.client.midiMode:
                         #self.client.chordSet = sTot
-                        self.client.pianoKeysUpdate(sTot)
+                        self.client.pianoKeysUpdate(tot)
 
                     notes = []
 
