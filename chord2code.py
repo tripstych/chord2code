@@ -20,14 +20,23 @@ ACTIVE_COLOR = "#a0a0f0"
 SETTINGS_PATH = './settings.cfg'
 
 
-INTRO_TEXT ="""Chord2Key::
-Select your MIDI Device from the inputs 
-Select an Output - required for passthru -  
+INTRO_TEXT ="""::Chord2Key::
+Select & connect a MIDI device,
+capture notes or chords and assign a 
+list of keystrokes / scancodes
+to have them playback.  
+Turn the MIDI capture off when 
+you're done, Playback mode is
+disabled until then.
 
-Use [MIDI Capture] to set the MIDI note/chord to record,
-or use the GUI keys to toggle the keys you want as your trip.
+Alternatively, use the GUI keyboard keys
+to toggle the keys you want as your trigger.
 
-Use [Keyboard Capture] to record keystrokes for your selcection.
+Use the [Keyboard Capture] button, or press
+an assigned keyboard key, to start and stop
+recording keystrokes. The currently assigned
+hotkey is shown in the status bar above.
+
 
 """
 
@@ -64,10 +73,10 @@ class MTKB():
         sg.theme('darkblue')
         #sg.set_options(button_color = "#ffffff")
         pygame.init()
-        
+        bwKeyNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
         # make a button and store it 
         def pianoKeyBtn(text = "", key = None, size=None, button_color = None):
-            self.pianoKeys[key] = sg.Button('', key = f"^{key}", size=size, button_color = button_color)
+            self.pianoKeys[key] = sg.Button(bwKeyNames[key],key = f"^{key}", size=size, button_color = button_color)
             return self.pianoKeys[key]
 
         # make a button and store it 
@@ -181,7 +190,6 @@ class MTKB():
         
 
         
-
         #self.disconnectBtn = sg.Button ( _('Disconnect'),k='_disconnect',disabled=True)
 
 
@@ -222,7 +230,7 @@ class MTKB():
         
 
         self.statusBar = sg.Text(self.statusBarText())
-        self.verbLines = sg.Multiline(INTRO_TEXT,size=(50,50),write_only=True, reroute_stdout=True)
+        self.verbLines = sg.Multiline(INTRO_TEXT,font="Serif 12",autoscroll=True,text_color="#ffffff",size=(50,50),write_only=True, reroute_stdout=True)
 
         pksFrame = sg.Frame(
                             '',
@@ -264,6 +272,7 @@ class MTKB():
                     ]]
 
         self.factory((layout,outlayout))
+        
 
     def factory(self,box):
         (layout,outlayout)=box
@@ -277,6 +286,10 @@ class MTKB():
         #factory gears -  gloo for the view 
         while True:
             event,  values = window.read()
+
+            if event == sg.WIN_CLOSED:
+                break
+
             self.inTheLoop = True
             if values is None:
                 continue
@@ -292,45 +305,42 @@ class MTKB():
             self.statusBar.update(self.statusBarText())
             
 #            self.keystrokeList.update(values=self.keystrokes)
+        
+            sEvent = F"{event}"
+            if sEvent.isnumeric():
+                verbox("DEFUNC?")
+                #self.scanCodeSet(sEvent)
+                continue
 
-            if event == sg.WIN_CLOSED:
-                break
-            else:
-                sEvent = F"{event}"
-                if sEvent.isnumeric():
-                    verbox("DEFUNC?")
-                    #self.scanCodeSet(sEvent)
-                    continue
+            if sEvent[0]=='^':
+                sEvent = sEvent[1:]
+                nEvent = int(sEvent)
+                self.midiBtnPress(nEvent)
+                continue
 
-                if sEvent[0]=='^':
-                    sEvent = sEvent[1:]
-                    nEvent = int(sEvent)
-                    self.midiBtnPress(nEvent)
-                    continue
+            
+            sEvent = sEvent[1:] if sEvent[0]=='_' else sEvent
+            if hasattr(self,sEvent): 
+                #my microFhactory[tm]}:'P  
+                #object to fill with options passed to function named by its key/ the event value strignified sEvent
+                dic = {}
+                for k, v in values.items():
+                    k=F"{k}"
+                    #buid a dict for the named func call
+                    if type(v) == type(""):
+                        spill = v.split('::')
+                        #for midi list/option values
+                        if k[0] == '_':
+                            dic[ k[1:] ] = v
+                        if len(spill) > 1:
+                            if spill[0].isnumeric():
+                                spill[0] = int(spill[0])
+                            dic[ k[1:] ] = spill[0] 
 
-                
-                sEvent = sEvent[1:] if sEvent[0]=='_' else sEvent
-                if hasattr(self,sEvent): 
-                    #my microFhactory[tm]}:'P  
-                    #object to fill with options passed to function named by its key/ the event value strignified sEvent
-                    dic = {}
-                    for k, v in values.items():
-                        k=F"{k}"
-                        #buid a dict for the named func call
-                        if type(v) == type(""):
-                            spill = v.split('::')
-                            #for midi list/option values
-                            if k[0] == '_':
-                                dic[ k[1:] ] = v
-                            if len(spill) > 1:
-                                if spill[0].isnumeric():
-                                    spill[0] = int(spill[0])
-                                dic[ k[1:] ] = spill[0] 
-
-                    #get the method / 'attribute' from this class
-                    attr = getattr(self,sEvent)
-                    if attr:
-                        attr(dic)
+                #get the method / 'attribute' from this class
+                attr = getattr(self,sEvent)
+                if attr:
+                    attr(dic)
 
         window.close()
 
@@ -428,6 +438,7 @@ class MTKB():
 
     def midiThru(self,event):
         self.midiThruState = not self.midiThruState
+        verbox("Send recognized keys/chords through MIDI Out." if self.midiThruState else "Silence recognized keys/chords from MIDI Out.")
         self.thruBtn.update(button_color = ACTIVE_COLOR if self.midiThruState else sg.DEFAULT_BUTTON_COLOR)
 
     def recMidiToggle(self,event):
@@ -514,7 +525,7 @@ class MTKB():
         self.daemon = MTKB_Daemon(Client = self)
 
         if not values:
-            print("no values!",values)
+            #print("no values!",values)
             return
         
         inPort = values.get('midiIn')
@@ -552,14 +563,14 @@ class MTKB():
             midi.quit()
 
         #now, start daemon
-        verbox(F"MIDI connect initiated.")
+        verbox(F"ignition ignitioned.")
 
         self.daemon.start( (int(inPort),int(outPort)) )
 
 
     def disconnect(self):
         if self.daemon:
-            #verbox("disconnect")
+            verbox("stopping MIDI daemon")
             self.daemon.stop()
     
     def getMidiDevices(self):
@@ -600,7 +611,7 @@ class MTKB_Daemon():
             #don't start what you haven't called destruct on
             return
         
-        verbox("starting MIDI daemon")
+        verbox("starting MIDI service.")
 
         if not midi.get_init():
             midi.quit()
@@ -617,6 +628,7 @@ class MTKB_Daemon():
             self.midiOut = midi.Output(  midiOutPort )
         self.thread.start()
         #debuggery("daemon@start:thread.start invoked")
+        verbox("Polling for MIDI note events.")
         verbox(F"In::{midiInPort} Out::{midiOutPort}  initialised :{midi.get_init()}")
 
     def stop(self):
@@ -627,7 +639,7 @@ class MTKB_Daemon():
 
         
     def poll(self):
-        verbox("started polling.")
+        verbox("started MIDI service, polling.")
         keysDown = 0
         notes = []  
 
