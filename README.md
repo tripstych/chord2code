@@ -3,8 +3,9 @@
 Ever been using your DAW with your QWERTY sitting just out of reach or awkwardly positioned and you need to hit that special key on it
 while you've got 88 black & white ones directly under your finger tips - just staring at you, mocking you and the futility of collaborative behaviour between corporations in a pre-galatic era [Sir be Sirius not].   
 
-It doesn't matter how good your MIDI controller is, it's not going to press F2
-and thoght, it'd be great if it would just press 'R' and 'space' when I hit this ... disharmonic chord I'd never play normally? or whatever?
+It doesn't matter how good your MIDI controller is, it's not going to press F2!  
+
+Ever think - Wouldn't'd be great if it would just press 'R' and 'space' when I hit this ... disharmonic chord I'd never play normally? or whatever?
 
 Me too.
 
