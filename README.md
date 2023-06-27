@@ -23,5 +23,8 @@ Service only baked version, sans GUI apart from start/stop and MIDI device selec
 Windows executable(s) for the lay - other finicky things.  Who knows? 
 
 Suggestions, comments, bug reports, etc are welcome and appreciated.
+The obvious -
+www.patreon.com/user?u=81207161
 
-...I cut my gums on a PET, ate an Apple that could only scream - a pre-e machine - yadayada, and eventually turned into an electrical spider, crashed, burned, burned, and now this....
+a little history ... ZX81, ][+, Amiga 500 *blink* 80386 etc..
+miniassembler & logic gates yummm!
